@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning - Project"
+author: "Abhishek Sinha"
+date: "8/12/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret, quietly = TRUE)
+library(rpart, quietly = TRUE)
+library(randomForest, quietly = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+
+## Download training and testing data
+
+```{r cache=TRUE, echo=FALSE}
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "training.csv")
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "testing.csv")
+pml.train <- read.csv("training.csv")
+pml.test <- read.csv("testing.csv")
+```
+
+## Zero Variance Data
+
+Removing variables with zero variance data.
+
+```{r}
+nearzero <- nearZeroVar(pml.train, saveMetrics = TRUE)
+pml.train <- pml.train[, !nearzero$nzv]
+```
+
+First seven variables are related to Id, User Name, row and timestamp data, which are not required for prediction.
+
+```{r}
+pml.train<-pml.train[,-(1:7)]
+pml.test<-pml.test[,-(1:7)]
+```
+
+## Splitting data
+
+Splitting training data into training and testing. Also creating a validation set from the new training set.
+
+Testing set will be used once to verify the model.
+
+```{r}
+
+pml.train<-pml.train[,colSums(is.na(pml.train)) == 0]
+
+
+# Partition train into train and test
+iftrain <- createDataPartition(pml.train$classe, p=0.7, list = FALSE)
+training <- pml.train[c(iftrain), ]
+testing <- pml.train[-iftrain, ]
+```
+
+
+## Preprocessing data
+
+```{r}
+n<-ncol(training)-1
+
+preObj <- preProcess(training[,1:n], method = c("knnImpute"))
+
+training[,1:n] <- predict(preObj, training[,1:n])
+testing[,1:n] <- predict(preObj, testing[,1:n])
+```
+
+## Model Specification
+
+7 fold cross validation in order to avoid overfitting.
+
+```{r}
+tc <- trainControl(method = "cv", number = 7, verboseIter=FALSE , preProcOptions="pca", allowParallel=TRUE)
+```
+
+### RPART Model
+```{r}
+rpart1 <- train(classe ~ ., data=training, method="rpart", trControl=tc)
+```
+
+### Random Forest
+```{r cache=TRUE}
+rf1 <- randomForest(x = training[,1:n], y=training[,52], trControl=tc)
+
+```
+
+### GBM Model
+```{r cache=TRUE}
+gbm1 <- train(classe ~ ., data=training, method="gbm", trControl=tc, verbose=FALSE)
+```
+
+## Accuracy on training set
+
+```{r}
+model <- c("RPART", "Random Forest","GBM")
+Accuracy <- c(max(rpart1$results$Accuracy),
+        confusionMatrix(rf1$predicted, training$classe)[3][[1]][[1]],
+        max(gbm1$results$Accuracy))
+        
+
+performance <- cbind(model,Accuracy)
+
+print(performance)
+```
+
+## Accuracy on testing set
+
+```{r}
+rpart1.pred <- predict(rpart1, newdata = testing)
+rf1.pred <- predict(rf1, newdata = testing)
+gbm1.pred <- predict(gbm1, newdata = testing)
+model <- c("RPART", "Random Forest","GBM")
+Accuracy <- c(confusionMatrix(rpart1.pred, testing$classe)[3][[1]][[1]],
+        confusionMatrix(rf1.pred, testing$classe)[3][[1]][[1]],
+        confusionMatrix(gbm1.pred, testing$classe)[3][[1]][[1]])
+        
+performance <- cbind(model,Accuracy)
+
+print(performance)
+```
+
+
+## Model Selection and predicting on the test data
+Looking at accuracy on both training and testing data, Random Forest has generated has the best model.
+
+Final Submission on the testing dataset
+```{r}
+names <- colnames(training)
+names <- names[names %in% "classe" == FALSE]
+pml.test<-pml.test[,names]
+pml.test[,1:n] <- predict(preObj, pml.test[,1:n])
+pred_test <- predict(rf1, newdata = pml.test)
+print(pred_test)
+```
